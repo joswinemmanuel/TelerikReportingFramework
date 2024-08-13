@@ -29,7 +29,7 @@ namespace TelerikReportingFramework.Controllers
             //}
 
             // If not a file, try to resolve as a type
-            var typeName = $"TelerikReportWebAPI.Reports.{reportName}, TelerikReportWebAPI";
+            var typeName = $"TelerikReportingFramework.Reports.{reportName}, TelerikReportingFramework";
             var type = Type.GetType(typeName);
             if (type != null && typeof(Telerik.Reporting.Report).IsAssignableFrom(type))
             {
