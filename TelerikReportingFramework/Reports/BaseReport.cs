@@ -6,64 +6,51 @@ using Telerik.Reporting.Drawing;
 using System.Collections.Generic;
 using System.Linq;
 using TextBox = Telerik.Reporting.TextBox;
+using TelerikReportingFramework.Models;
+using TelerikReportingFramework.DataLoader;
+using SortDirection = TelerikReportingFramework.Models.SortDirection;
 
 namespace TelerikReportingFramework.Reports
 {
-    //interface IBaseReport
-    //{
-    //    void InitializeReport(string connectionString, string query);
-    //    void AddAdditionalColumns(DataTable dataTable);
-    //    void ApplySorting(List<SortExpression> sortExpressions);
-
-    //}
-
-    public class SortExpression
-    {
-        public string PropertyName { get; set; }
-        public SortDirection Direction { get; set; }
-    }
-
-    public enum SortDirection
-    {
-        Ascending,
-        Descending
-    }
     public class BaseReport : Telerik.Reporting.Report
     {
         protected List<SortExpression> sortExpressions = new List<SortExpression>();
+        protected List<FilterExpression> filterExpressions = new List<FilterExpression>();
+        protected List<GroupExpression> groupExpressions = new List<GroupExpression>();
+        protected IDataLoader dataLoader;
+
+        public BaseReport()
+        {
+            // Default constructor
+        }
+        public BaseReport(IDataLoader dataLoader)
+        {
+            this.dataLoader = dataLoader;
+        }
+
         public virtual void InitializeReport(string connectionString, string query)
         {
-            var data = GetData(connectionString, query);
+
+            dataLoader = new SqlDataLoader();
+
+            if (dataLoader == null)
+            {
+                throw new InvalidOperationException("DataLoader is not initialized.");
+            }
+            
+            var data = dataLoader.GetData(connectionString, query);
+            AddAdditionalColumns(data);
             Console.WriteLine(data.ToString());
             this.table1.DataSource = data;
             AddDynamicColumns(data);
             ApplySorting(sortExpressions);
-        }
-
-        public virtual DataTable GetData(string connectionString, string query)
-        {
-            using (SqlConnection connection = new SqlConnection(connectionString))
-            {
-                SqlCommand command = new SqlCommand(query, connection);
-                SqlDataAdapter adapter = new SqlDataAdapter(command);
-                DataTable dataTable = new DataTable();
-                try
-                {
-                    connection.Open();
-                    adapter.Fill(dataTable);
-                    AddAdditionalColumns(dataTable);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"An error occurred: {ex.Message}");
-                }
-                return dataTable;
-            }
+            ApplyFiltering(filterExpressions);
+            ApplyGrouping(groupExpressions);
         }
 
         public virtual void AddAdditionalColumns(DataTable dataTable)
         {
-            // Must override this in dervied class
+            // Must override this in derived class
         }
 
         public virtual void AddDynamicColumns(DataTable dataTable)
@@ -150,6 +137,128 @@ namespace TelerikReportingFramework.Reports
             sortExpressions.Add(new SortExpression { PropertyName = propertyName, Direction = direction });
         }
 
+        private void ApplyFiltering(List<FilterExpression> filterExpressions)
+        {
+            if (filterExpressions == null || filterExpressions.Count == 0)
+                return;
+
+            foreach (var filterExpression in filterExpressions)
+            {
+                this.table1.Filters.Add(new Telerik.Reporting.Filter(
+                    $"= Fields.{filterExpression.PropertyName}",
+                    filterExpression.Operator,
+                    filterExpression.Value.ToString()
+                ));
+            }
+        }
+
+        public void AddFilterExpression(string propertyName, FilterOperator @operator, object value)
+        {
+            filterExpressions.Add(new FilterExpression
+            {
+                PropertyName = propertyName,
+                Operator = @operator,
+                Value = value
+            });
+        }
+
+        private string ConvertFilterOperatorToSql(FilterOperator @operator)
+        {
+            switch (@operator)
+            {
+                case FilterOperator.Equal:
+                    return "=";
+                case FilterOperator.NotEqual:
+                    return "<>";
+                case FilterOperator.GreaterThan:
+                    return ">";
+                case FilterOperator.GreaterOrEqual:
+                    return ">=";
+                case FilterOperator.LessThan:
+                    return "<";
+                case FilterOperator.LessOrEqual:
+                    return "<=";
+                case FilterOperator.TopN:
+                    return "Top N";
+                case FilterOperator.BottomN:
+                    return "Bottom N";
+                case FilterOperator.TopPercent:
+                    return "Top %";
+                case FilterOperator.BottomPercent:
+                    return "Bottom %";
+                case FilterOperator.Like:
+                    return "LIKE";
+                case FilterOperator.NotLike:
+                    return "NOT LIKE";
+                default:
+                    throw new ArgumentException($"Unsupported filter operator: {@operator}");
+            }
+        }
+
+        private void ApplyGrouping(List<GroupExpression> groupExpressions)
+        {
+            if (groupExpressions == null || groupExpressions.Count == 0)
+                return;
+            this.table1.RowGroups.Clear();
+            foreach (var groupExpression in groupExpressions)
+            {
+                // Create a new table group
+                var tableGroup = new TableGroup();
+                tableGroup.Groupings.Add(new Grouping($"= Fields.{groupExpression.PropertyName}"));
+                tableGroup.Sortings.Add(new Sorting($"= Fields.{groupExpression.PropertyName}",
+                    groupExpression.SortDirection == SortDirection.Ascending ?
+                        Telerik.Reporting.SortDirection.Asc :
+                        Telerik.Reporting.SortDirection.Desc));
+                // Add the group to the table
+                this.table1.RowGroups.Add(tableGroup);
+            }
+            AdjustTableLayout();
+        }
+
+        public void AddGroupExpression(string propertyName, SortDirection sortDirection = SortDirection.Ascending)
+        {
+            groupExpressions.Add(new GroupExpression
+            {
+                PropertyName = propertyName,
+                SortDirection = sortDirection
+            });
+        }
+
+        private void AdjustTableLayout()
+        {
+            // Ensure there's a detail row in the table
+            if (this.table1.Body.Rows.Count == 0)
+            {
+                this.table1.Body.Rows.Add(new TableBodyRow(Unit.Cm(0.5)));
+            }
+            // Get the number of columns in the table
+            int columnCount = this.table1.ColumnGroups.Count;
+            // Ensure that each column has a corresponding cell in the detail row
+            for (int i = this.table1.Body.Columns.Count; i < columnCount; i++)
+            {
+                var textBox = new TextBox
+                {
+                    Value = $"= Fields.{this.table1.ColumnGroups[i].Name}",
+                    Size = new SizeU(Unit.Cm(2), Unit.Cm(0.5)),
+                    StyleName = "Normal.TableBody"
+                };
+                this.table1.Body.SetCellContent(0, i, textBox);
+            }
+            // Adjust group header rows
+            foreach (var group in this.table1.RowGroups)
+            {
+                if (group.ReportItem is TextBox headerTextBox)
+                {
+                    headerTextBox.Style.BackgroundColor = System.Drawing.Color.LightGray;
+                    headerTextBox.Style.Font.Bold = true;
+                    headerTextBox.Style.TextAlign = Telerik.Reporting.Drawing.HorizontalAlign.Left;
+                    headerTextBox.Style.Padding.Left = Telerik.Reporting.Drawing.Unit.Pixel(5);
+                }
+            }
+        }
+
+
+
         private Telerik.Reporting.DetailSection detailSection1;
         private Telerik.Reporting.Table table1;
         private Telerik.Reporting.TextBox textBox2;
@@ -196,7 +305,7 @@ namespace TelerikReportingFramework.Reports
             this.table1.Body.Columns.Add(new Telerik.Reporting.TableBodyColumn(Telerik.Reporting.Drawing.Unit.Cm(2D)));
             this.table1.Body.Rows.Add(new Telerik.Reporting.TableBodyRow(Telerik.Reporting.Drawing.Unit.Cm(0.5D)));
             this.table1.Body.SetCellContent(0, 0, this.textBox2);
-            tableGroup1.Name = "countryId";
+            tableGroup1.Name = "";
             tableGroup1.ReportItem = this.textBox1;
             this.table1.ColumnGroups.Add(tableGroup1);
             this.table1.Items.AddRange(new Telerik.Reporting.ReportItemBase[] {

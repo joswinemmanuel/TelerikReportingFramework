@@ -2,15 +2,37 @@
 using System.Data;
 using System;
 using TelerikReportingFramework.Reports;
+using TelerikReportingFramework.DataLoader;
+using TelerikReportingFramework.Models;
+using Telerik.Reporting;
+using SortDirection = TelerikReportingFramework.Models.SortDirection;
 
 namespace TelerikReportingFramework.Reports
 {
     public partial class PatientReport : BaseReport
     {
-        public PatientReport()
+        public PatientReport() : base()
         {
-            // We have to give connection string and query needed to be on the report here
             InitializeComponent();
+            Initialize();
+        }
+
+        public PatientReport(IDataLoader dataLoader) : base(dataLoader)
+        {
+            InitializeComponent();
+            Initialize();
+        }
+        private void Initialize()
+        {
+            // Add sorting expressions
+            //AddSortExpression("Age", SortDirection.Ascending);
+
+            // Add filtering expressions
+            //AddFilterExpression("Age", FilterOperator.GreaterThan, 30);
+
+            // Add grouping expressions
+            AddGroupExpression("Country");
+
             string connectionString = "Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=carestackdb;Integrated Security=True";
             string query = "SELECT FirstName, LastName, Age, Country, Gender, Address, PhoneNumber, Email, DateOfBirth, MedicalHistory FROM Patients;";
             InitializeReport(connectionString, query);
